@@ -3,6 +3,36 @@
 #include <math.h>
 #include <stdint.h>
 
+struct SuperBlock{
+		uint32_t blocksize;
+		uint16_t inodesize;
+		uint32_t firstinode;
+		uint32_t totblocks;
+		uint32_t totinodes;
+		uint32_t inodesgrp;
+		uint32_t blocskgrp;
+		uint32_t grps;
+		uint16_t fstate;
+		char* volname;
+	}typedef SuperBlock;
+
+struct BlockGroup{
+		uint32_t blockmap;
+		uint32_t inodemap;
+		uint32_t inodetable;
+		uint16_t unblocks;
+		uint16_t uninodes;
+		uint16_t dirs;
+	}typedef BlockGroups;
+
+struct Directories{
+		uint32_t InodeNumber;
+		char* Name;
+		struct Directories* parent;
+	}typedef Directories;
+
+int ListContents(struct Directories dirs);
+
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         fprintf(stderr, "Provide image as argument");
@@ -14,18 +44,8 @@ int main(int argc, char *argv[]) {
         perror("Failed to open image file");
         return 1;
     }
-	
-	struct SuperBlock{
-		uint32_t blocksize;
-		uint16_t inodesize;
-		uint32_t totblocks;
-		uint32_t totinodes;
-		uint32_t inodesgrp;
-		uint32_t blocskgrp;
-		uint32_t grps;
-		uint16_t fstate;
-		char* volname;
-	}sb;
+
+	struct SuperBlock sb;
 
     unsigned char buffer[1024];
     int block_num = 1;
@@ -71,12 +91,16 @@ int main(int argc, char *argv[]) {
 		if(fours[19]>=1){
 			sb.inodesize=twos[44];
 			sb.volname=(buffer+120);
+			sb.firstinode=fours[21];
 			printf("Volume name= %d, %d, %d, %d\n",fours[40],fours[41],fours[42],fours[43]);
 			printf("Required features=%d\n",fours[24]);
 			printf("Compression algorithms used=%d\n", fours[50]);
+			printf("First Inode=%d\n", fours[21]);
 		}
-		else
+		else{
 			sb.inodesize=128;
+			sb.firstinode=11;
+		}
 		printf("Inode size=%d\n",sb.inodesize);
 		}
 	else{
@@ -87,14 +111,6 @@ int main(int argc, char *argv[]) {
 		
 	unsigned char buffer2[sb.blocksize];
 
-	struct BlockGroup{
-		uint32_t blockmap;
-		uint32_t inodemap;
-		uint32_t inodetable;
-		uint16_t unblocks;
-		uint16_t uninodes;
-		uint16_t dirs;
-	};
 	struct BlockGroup bg[sb.grps];
 
 	int seek=sb.blocksize;
@@ -129,7 +145,25 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr,"Unable to read block group descriptor table");
 		return 1;
 	}
-	
+
+	struct Directories dirs={2,"(root)/",NULL};
+
+	fseek(img, sb.blocksize*bg[0].inodetable, SEEK_SET);
+
+	if (fread(buffer2, 1, sb.blocksize, img) == sb.blocksize)
+	{
+		uint16_t* twos3=(uint16_t *)buffer2;
+		uint32_t* fours3=(uint32_t *)buffer2;
+		twos3+=128;
+		fours3+=64;
+		printf("Root Directory Inode\n");
+		printf("Type and permissions= %04X\n",twos3[0]);
+		printf("Direct pointer 0= %d\n",fours3[10]);
+	}
+	else{
+		printf("Unable to read the inode table");
+	}
+
     fclose(img);
     return 0;
 }
