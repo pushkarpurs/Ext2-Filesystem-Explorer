@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdint.h>
+#include <stdbool.h>
+#include <string.h>
 
 struct SuperBlock{
 		uint32_t blocksize;
@@ -23,17 +25,46 @@ struct BlockGroup{
 		uint16_t unblocks;
 		uint16_t uninodes;
 		uint16_t dirs;
-	}typedef BlockGroups;
+	}typedef BlockGroup;
 
 struct Directories{
 		uint32_t InodeNumber;
 		char* Name;
 		struct Directories* parent;
+		uint64_t offset;
 	}typedef Directories;
 
-int ListContents(struct Directories dirs);
+
+void ReadContents(uint32_t blkno){
+	printf("ReadingContentsFrom%d\n",blkno);
+	return;
+}
+
+void List(FILE* img, struct Directories* dirptr){
+	unsigned char ibuf[256];
+	fseek(img, dirptr->offset, SEEK_SET);
+	if(fread(ibuf,1,256,img)==256){
+		uint32_t* fours=(uint32_t*)ibuf;
+		fours+=10;
+		for(int i=0;i<12;i++){
+			if(fours[i]!=0){
+				ReadContents(fours[i]);
+			}
+			else
+				break;
+		}
+	}else{
+		printf("Failed to read %s dir inode\n");
+		return;
+	}
+}
 
 int main(int argc, char *argv[]) {
+	#ifdef _WIN32
+    	system("cls");
+	#else
+    	printf("\033[2J\033[H");
+	#endif
     if (argc != 2) {
         fprintf(stderr, "Provide image as argument");
         return 1;
@@ -56,6 +87,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (fread(buffer, 1, 1024, img) == 1024) {
+		printf("------------------SuprBlock------------------\n");
 		if(buffer[56]==83 && buffer[57]==239)
 			printf("The image is in Ext2 format\n");
 		else{
@@ -92,7 +124,7 @@ int main(int argc, char *argv[]) {
 			sb.inodesize=twos[44];
 			sb.volname=(buffer+120);
 			sb.firstinode=fours[21];
-			printf("Volume name= %d, %d, %d, %d\n",fours[40],fours[41],fours[42],fours[43]);
+			printf("Volume name= %s\n",sb.volname);
 			printf("Required features=%d\n",fours[24]);
 			printf("Compression algorithms used=%d\n", fours[50]);
 			printf("First Inode=%d\n", fours[21]);
@@ -130,7 +162,8 @@ int main(int argc, char *argv[]) {
 			bg[i].unblocks=twos2[6];
 			bg[i].uninodes=twos2[7];
 			bg[i].dirs=twos2[9];
-			printf("Block group %d -----------------------------\n", i+1);
+			printf("\n");
+			printf("--------------------Block group %d -----------------\n", i+1);
 			printf("Block address of block usage bitmap %d\n", fours2[0]);
 			printf("Block address of inode usage bitmap %d\n", fours2[1]);
 			printf("Starting block address of inode table %d\n", fours2[2]);
@@ -146,22 +179,41 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
-	struct Directories dirs={2,"(root)/",NULL};
+	printf("\n");
 
-	fseek(img, sb.blocksize*bg[0].inodetable, SEEK_SET);
+	char cmd[257];
+	struct Directories dirs={2,"(root)",NULL,sb.blocksize*bg[0].inodetable+sb.inodesize};
+	struct Directories* dirptr=&dirs;
 
-	if (fread(buffer2, 1, sb.blocksize, img) == sb.blocksize)
-	{
-		uint16_t* twos3=(uint16_t *)buffer2;
-		uint32_t* fours3=(uint32_t *)buffer2;
-		twos3+=128;
-		fours3+=64;
-		printf("Root Directory Inode\n");
-		printf("Type and permissions= %04X\n",twos3[0]);
-		printf("Direct pointer 0= %d\n",fours3[10]);
-	}
-	else{
-		printf("Unable to read the inode table");
+	//-------------Input Loop--------------------
+	while(true){
+		struct Directories* t=dirptr;
+		while(true){
+			printf("%s/",t->Name);
+			if (t->parent==NULL){
+				printf(">>");
+				break;
+			}
+			t=t->parent;
+		}
+		if(fgets(cmd, sizeof(cmd), stdin)!=NULL){
+			cmd[strcspn(cmd,"\n")]='\0';
+		}
+		else{
+		}
+		if(strcmp(cmd,"exit")==0){
+			break;
+		}
+		else if(strcmp(cmd, "ls")==0){
+			List(img,dirptr);
+		}
+		else if(strcmp(cmd,"cls")==0){
+			#ifdef _WIN32
+    			system("cls");
+			#else
+    			printf("\033[2J\033[H");
+			#endif
+		}
 	}
 
     fclose(img);
