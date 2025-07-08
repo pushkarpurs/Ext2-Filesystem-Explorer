@@ -16,7 +16,8 @@ struct SuperBlock{
 		uint32_t grps;
 		uint16_t fstate;
 		char* volname;
-	}typedef SuperBlock;
+	}* sb;
+
 
 struct BlockGroup{
 		uint32_t blockmap;
@@ -25,14 +26,14 @@ struct BlockGroup{
 		uint16_t unblocks;
 		uint16_t uninodes;
 		uint16_t dirs;
-	}typedef BlockGroup;
+	}* bg;
 
 struct Directories{
-		uint32_t InodeNumber;
-		char* Name;
+		uint32_t inodenumber;
+		char* name;
 		struct Directories* parent;
 		uint64_t offset;
-	}typedef Directories;
+	}* cd;
 
 
 void ReadContents(uint32_t blkno){
@@ -69,20 +70,19 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Provide image as argument");
         return 1;
     }
-
+	sb=calloc(1,sizeof(struct SuperBlock));
     FILE *img = fopen(argv[1], "rb");
     if (!img) {
         perror("Failed to open image file");
         return 1;
     }
 
-	struct SuperBlock sb;
-
     unsigned char buffer[1024];
     int block_num = 1;
 	
 	if (fseek(img, block_num * 1024, SEEK_SET) != 0) {
         perror("Failed to seek to block");
+		fclose(img);
         return 1;
     }
 
@@ -92,11 +92,12 @@ int main(int argc, char *argv[]) {
 			printf("The image is in Ext2 format\n");
 		else{
 			fprintf(stderr, "Image is nhot in Ext2 format");
+			fclose(img);
 			return 1;
 		}
 		uint32_t* fours=(uint32_t* )buffer;
 		uint16_t* twos=(uint16_t* )buffer; 
-		sb.fstate=twos[29];
+		sb->fstate=twos[29];
 		if(twos[29]==1)
 		{
 			printf("File system state is clean\n");
@@ -105,35 +106,37 @@ int main(int argc, char *argv[]) {
 			printf("File system state isnt clean\n");
 		}
 		if(ceil(fours[1]*1.0/fours[8])==ceil(fours[0]*1.0/fours[10])){
-			sb.grps=(int)ceil(fours[1]*1.0/fours[8]);
-			sb.totblocks=fours[1];
-			sb.totinodes=fours[0];
-			sb.inodesgrp=fours[10];
-			sb.blocskgrp=fours[8];
+			sb->grps=(int)ceil(fours[1]*1.0/fours[8]);
+			sb->totblocks=fours[1];
+			sb->totinodes=fours[0];
+			sb->inodesgrp=fours[10];
+			sb->blocskgrp=fours[8];
 			printf("Number of blocks groups= %d\n", (int)ceil(fours[1]*1.0/fours[8]));
 			printf("Number of blocks per group= %d\n", fours[8]);
 			printf("Number of inodes per group= %d\n", fours[10]);
 		}
 		else{
-			printf("Mismatch number of block groups");
+			fprintf(stderr,"Mismatch number of block groups");
+			fclose(img);
+			return 1;
 		}
-		sb.blocksize=1024<<fours[6];
+		sb->blocksize=1024<<fours[6];
 		printf("Block size=%d\n",1024<<fours[6]);
 		printf("Major verison of FS=%d\n",fours[19]);
 		if(fours[19]>=1){
-			sb.inodesize=twos[44];
-			sb.volname=(buffer+120);
-			sb.firstinode=fours[21];
-			printf("Volume name= %s\n",sb.volname);
+			sb->inodesize=twos[44];
+			sb->volname=(buffer+120);
+			sb->firstinode=fours[21];
+			printf("Volume name= %s\n",sb->volname);
 			printf("Required features=%d\n",fours[24]);
 			printf("Compression algorithms used=%d\n", fours[50]);
 			printf("First Inode=%d\n", fours[21]);
 		}
 		else{
-			sb.inodesize=128;
-			sb.firstinode=11;
+			sb->inodesize=128;
+			sb->firstinode=11;
 		}
-		printf("Inode size=%d\n",sb.inodesize);
+		printf("Inode size=%d\n",sb->inodesize);
 		}
 	else{
         perror("Error while reading Superblock");
@@ -141,27 +144,27 @@ int main(int argc, char *argv[]) {
         return 1;
 		}
 		
-	unsigned char buffer2[sb.blocksize];
+	unsigned char buffer2[sb->blocksize];
 
-	struct BlockGroup bg[sb.grps];
+	bg=calloc(sb->grps,sizeof(struct BlockGroup));
 
-	int seek=sb.blocksize;
+	int seek=sb->blocksize;
 	if (seek==1024)
 		seek=2048;
 
 	fseek(img, seek, SEEK_SET);
 
-	if (fread(buffer2, 1, sb.blocksize, img) == sb.blocksize)
+	if (fread(buffer2, 1, sb->blocksize, img) == sb->blocksize)
 	{
 		uint32_t* fours2=(uint32_t* )buffer2;
 		uint16_t* twos2=(uint16_t* )buffer2;
-		for(int i=0;i<sb.grps;i++){ 
-			bg[i].blockmap=fours2[0];
-			bg[i].inodemap=fours2[1];
-			bg[i].inodetable=fours2[2];
-			bg[i].unblocks=twos2[6];
-			bg[i].uninodes=twos2[7];
-			bg[i].dirs=twos2[9];
+		for(int i=0;i<sb->grps;i++){ 
+			(bg+i)->blockmap=fours2[0];
+			(bg+i)->inodemap=fours2[1];
+			(bg+i)->inodetable=fours2[2];
+			(bg+i)->unblocks=twos2[6];
+			(bg+i)->uninodes=twos2[7];
+			(bg+i)->dirs=twos2[9];
 			printf("\n");
 			printf("--------------------Block group %d -----------------\n", i+1);
 			printf("Block address of block usage bitmap %d\n", fours2[0]);
@@ -176,20 +179,25 @@ int main(int argc, char *argv[]) {
 	}
 	else{
 		fprintf(stderr,"Unable to read block group descriptor table");
+		fclose(img);
 		return 1;
 	}
 
 	printf("\n");
 
 	char cmd[257];
-	struct Directories dirs={2,"(root)",NULL,sb.blocksize*bg[0].inodetable+sb.inodesize};
-	struct Directories* dirptr=&dirs;
+	cd=calloc(1,sizeof(struct Directories));
+	cd->inodenumber=2;
+	cd->name=malloc(7);
+	strcpy(cd->name,"(root)");
+	cd->parent=NULL;
+	cd->offset=sb->blocksize*(bg+0)->inodetable+sb->inodesize;
 
 	//-------------Input Loop--------------------
 	while(true){
-		struct Directories* t=dirptr;
+		struct Directories* t=cd;
 		while(true){
-			printf("%s/",t->Name);
+			printf("%s/",t->name);
 			if (t->parent==NULL){
 				printf(">>");
 				break;
@@ -205,7 +213,7 @@ int main(int argc, char *argv[]) {
 			break;
 		}
 		else if(strcmp(cmd, "ls")==0){
-			List(img,dirptr);
+			List(img,cd);
 		}
 		else if(strcmp(cmd,"cls")==0){
 			#ifdef _WIN32
