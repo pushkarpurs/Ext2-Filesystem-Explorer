@@ -16,6 +16,8 @@ struct SuperBlock{
 		uint32_t grps;
 		uint16_t fstate;
 		char* volname;
+		bool compression;
+		bool typefield;
 	}* sb;
 
 
@@ -36,8 +38,44 @@ struct Directories{
 	}* cd;
 
 
-void ReadContents(uint32_t blkno){
-	printf("ReadingContentsFrom%d\n",blkno);
+void ReadContents(FILE* img,uint32_t blkno){
+	const char* file_types[] = {
+        "Unknown type",
+        "Regular file",
+        "Directory",
+        "Character device",
+        "Block device",
+        "FIFO",
+        "Socket",
+        "Symbolic link (soft link)" 
+    };
+	unsigned char blkbuf[sb->blocksize];
+	fseek(img,blkno*sb->blocksize, SEEK_SET);
+	if(fread(blkbuf,1,sb->blocksize,img)==sb->blocksize){
+		uint32_t* fours=(uint32_t*)blkbuf;
+		uint16_t* twos=(uint16_t*)blkbuf;
+		uint8_t* ones=(uint8_t*)blkbuf;
+		int i=0;
+		while (i<=((sb->blocksize/4)-2)){
+			uint16_t entrysize=twos[2];
+			if(fours[0]!=0){
+				if(sb->typefield){
+					printf("%s (%s)",(ones+8), file_types[ones[7]]);
+				}
+				else{
+					printf("%s (%s)",(ones+8), file_types[0]);
+				}
+				printf("\n");
+			}
+			i+=entrysize/4;
+			fours+=entrysize/4;
+			twos+=entrysize/2;
+			ones+=entrysize;
+		}
+	}
+	else{
+		printf("Error in reading directory entries");
+	}
 	return;
 }
 
@@ -49,7 +87,7 @@ void List(FILE* img, struct Directories* dirptr){
 		fours+=10;
 		for(int i=0;i<12;i++){
 			if(fours[i]!=0){
-				ReadContents(fours[i]);
+				ReadContents(img,fours[i]);
 			}
 			else
 				break;
@@ -127,6 +165,8 @@ int main(int argc, char *argv[]) {
 			sb->inodesize=twos[44];
 			sb->volname=(buffer+120);
 			sb->firstinode=fours[21];
+			sb->compression=(fours[24]%2==1);
+			sb->typefield=((fours[24]>>1)%2==1);
 			printf("Volume name= %s\n",sb->volname);
 			printf("Required features=%d\n",fours[24]);
 			printf("Compression algorithms used=%d\n", fours[50]);
