@@ -20,7 +20,6 @@ struct SuperBlock{
 		bool typefield;
 	}* sb;
 
-
 struct BlockGroup{
 		uint32_t blockmap;
 		uint32_t inodemap;
@@ -30,15 +29,78 @@ struct BlockGroup{
 		uint16_t dirs;
 	}* bg;
 
-struct Directories{
+struct Directory{
 		uint32_t inodenumber;
 		char* name;
-		struct Directories* parent;
 		uint64_t offset;
 	}* cd;
 
+bool SelectDir(FILE* img, uint32_t blkno, struct Directory* dir, char* name){
+	unsigned char blkbuf[sb->blocksize];
+	int newbno;
+	int newofst;
+	fseek(img,blkno*sb->blocksize, SEEK_SET);
+	if(fread(blkbuf,1,sb->blocksize,img)==sb->blocksize){
+		uint32_t* fours=(uint32_t*)blkbuf;
+		uint16_t* twos=(uint16_t*)blkbuf;
+		uint8_t* ones=(uint8_t*)blkbuf;
+		int i=0;
+		while (i<=((sb->blocksize/4)-2)){
+			uint16_t entrysize=twos[2];
+			if(fours[0]!=0){
+				if(ones[7]==2 && strcmp(name,(ones+8))){
+					free(dir->name);
+					dir->name=malloc(strlen(name)+1);
+					strcpy(dir->name,name);
+					dir->inodenumber=fours[0];
+					newbno=(fours[0]-1)/sb->inodesgrp;
+					newofst=(fours[0]-1)%sb->inodesgrp;
+					newofst*=sb->inodesize;
+					dir->offset=(bg+newbno)->inodetable*sb->blocksize+newofst;
+					return true;
+				}
+			}
+			i+=entrysize/4;
+			fours+=entrysize/4;
+			twos+=entrysize/2;
+			ones+=entrysize;
+		}
+	}
+	else{
+		printf("Error in reading directory entries\n");
+		return true;
+	}
+	return false;
+}
 
-void ReadContents(FILE* img,uint32_t blkno){
+void ChangeDir(FILE* img, struct Directory* dirptr, char* name){
+	if(!sb->typefield){
+		printf("Typefield not set");
+		return;
+	}
+	unsigned char ibuf[sb->inodesize];
+	fseek(img, dirptr->offset, SEEK_SET);
+	if(fread(ibuf,1,sb->inodesize,img)==sb->inodesize){
+		uint32_t* fours=(uint32_t*)ibuf;
+		fours+=10;
+		for(int i=0;i<12;i++){
+			if(fours[i]!=0){
+				if(SelectDir(img,fours[i],dirptr,name)){
+					return;
+				}
+			}
+			else
+				break;
+		}
+	}else{
+		printf("Failed to read %s dir inode\n");
+		return;
+	}
+	printf("Directory not found\n");
+	return;
+}
+
+void ReadContents(FILE* img, uint32_t blkno){
 	const char* file_types[] = {
         "Unknown type",
         "Regular file",
@@ -79,10 +141,10 @@ void ReadContents(FILE* img,uint32_t blkno){
 	return;
 }
 
-void List(FILE* img, struct Directories* dirptr){
-	unsigned char ibuf[256];
+void List(FILE* img, struct Directory* dirptr){
+	unsigned char ibuf[sb->inodesize];
 	fseek(img, dirptr->offset, SEEK_SET);
-	if(fread(ibuf,1,256,img)==256){
+	if(fread(ibuf,1,sb->inodesize,img)==sb->inodesize){
 		uint32_t* fours=(uint32_t*)ibuf;
 		fours+=10;
 		for(int i=0;i<12;i++){
@@ -226,24 +288,17 @@ int main(int argc, char *argv[]) {
 	printf("\n");
 
 	char cmd[257];
-	cd=calloc(1,sizeof(struct Directories));
+	cd=calloc(1,sizeof(struct Directory));
 	cd->inodenumber=2;
-	cd->name=malloc(7);
-	strcpy(cd->name,"(root)");
-	cd->parent=NULL;
+	cd->name=malloc(2);
+	strcpy(cd->name,"");
 	cd->offset=sb->blocksize*(bg+0)->inodetable+sb->inodesize;
 
 	//-------------Input Loop--------------------
 	while(true){
-		struct Directories* t=cd;
-		while(true){
-			printf("%s/",t->name);
-			if (t->parent==NULL){
-				printf(">>");
-				break;
-			}
-			t=t->parent;
-		}
+		struct Directory* t=cd;
+		printf("%s/",t->name);
+		printf(">>");
 		if(fgets(cmd, sizeof(cmd), stdin)!=NULL){
 			cmd[strcspn(cmd,"\n")]='\0';
 		}
@@ -262,8 +317,18 @@ int main(int argc, char *argv[]) {
     			printf("\033[2J\033[H");
 			#endif
 		}
+		else if(strncmp(cmd,"cd",2)==0){
+			char* nme=strchr(cmd,' ');
+			if(nme!=NULL){
+				nme+=1;
+				if(nme[0]!=0 && nme[0]!=32){
+					ChangeDir(img, cd, nme);
+				}
+			}
+			else
+				printf("Change directory command cd <dir name>\n");
+		}
 	}
-
     fclose(img);
     return 0;
 }
