@@ -48,7 +48,7 @@ bool SelectDir(FILE* img, uint32_t blkno, struct Directory* dir, char* name){
 		while (i<=((sb->blocksize/4)-2)){
 			uint16_t entrysize=twos[2];
 			if(fours[0]!=0){
-				if(ones[7]==2 && strcmp(name,(ones+8))){
+				if(ones[7]==2 && strcmp(name,(ones+8))==0){
 					free(dir->name);
 					dir->name=malloc(strlen(name)+1);
 					strcpy(dir->name,name);
