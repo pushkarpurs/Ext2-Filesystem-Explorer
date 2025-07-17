@@ -31,14 +31,109 @@ struct BlockGroup{
 
 struct Directory{
 		uint32_t inodenumber;
-		char* name;
 		uint64_t offset;
 	}* cd;
 
+struct Path{
+		struct Path* parent;
+		struct Path* child;
+		char* name;
+}* bpth,* epth;
+
+void ReadFileInode(FILE* img, uint32_t finoffset){
+	unsigned char ibuf[sb->inodesize];
+	unsigned char bbuf[sb->blocksize];
+	fseek(img, finoffset, SEEK_SET);
+	if(fread(ibuf,1,sb->inodesize,img)==sb->inodesize){
+		uint32_t* fours=(uint32_t*)ibuf;
+		fours+=10;
+		for(int i=0;i<12;i++){
+			if(fours[i]!=0){
+				fseek(img,fours[i]*sb->blocksize, SEEK_SET);
+				if(fread(bbuf,1,sb->blocksize,img)==sb->blocksize){
+					printf("%s",bbuf);
+				}
+				else{
+					printf("Failed to read file block (%d)\n",fours[i]);
+					return;
+				}
+			}
+			else
+				break;
+		}
+	}else{
+		printf("Failed to read file inode\n");
+		return;
+	}
+	return;
+}
+
+bool SelectFile(FILE* img, uint32_t blkno, struct Directory* dir, char* name){
+	unsigned char blkbuf[sb->blocksize];
+	uint32_t newbno;
+	uint32_t newofst;
+	fseek(img,blkno*sb->blocksize, SEEK_SET);
+	if(fread(blkbuf,1,sb->blocksize,img)==sb->blocksize){
+		uint32_t* fours=(uint32_t*)blkbuf;
+		uint16_t* twos=(uint16_t*)blkbuf;
+		uint8_t* ones=(uint8_t*)blkbuf;
+		int i=0;
+		while (i<=((sb->blocksize/4)-2)){
+			uint16_t entrysize=twos[2];
+			if(fours[0]!=0){
+				if(ones[7]==1 && strcmp(name,(ones+8))==0){
+					newbno=(fours[0]-1)/sb->inodesgrp;
+					newofst=(fours[0]-1)%sb->inodesgrp;
+					newofst*=sb->inodesize;
+					newofst=(bg+newbno)->inodetable*sb->blocksize+newofst;
+					ReadFileInode(img,newofst);
+					return true;
+				}
+			}
+			i+=entrysize/4;
+			fours+=entrysize/4;
+			twos+=entrysize/2;
+			ones+=entrysize;
+		}
+	}
+	else{
+		printf("Error in reading directory entries\n");
+		return true;
+	}
+	return false;
+}
+
+void Concatenate(FILE* img, struct Directory* dirptr, char* name){
+	if(!sb->typefield){
+		printf("Typefield not set");
+		return;
+	}
+	unsigned char ibuf[sb->inodesize];
+	fseek(img, dirptr->offset, SEEK_SET);
+	if(fread(ibuf,1,sb->inodesize,img)==sb->inodesize){
+		uint32_t* fours=(uint32_t*)ibuf;
+		fours+=10;
+		for(int i=0;i<12;i++){
+			if(fours[i]!=0){
+				if(SelectFile(img,fours[i],dirptr,name)){
+					return;
+				}
+			}
+			else
+				break;
+		}
+	}else{
+		printf("Failed to read dir inode\n");
+		return;
+	}
+	printf("File not found\n");
+	return;
+}
+
 bool SelectDir(FILE* img, uint32_t blkno, struct Directory* dir, char* name){
 	unsigned char blkbuf[sb->blocksize];
-	int newbno;
-	int newofst;
+	uint32_t newbno;
+	uint32_t newofst;
 	fseek(img,blkno*sb->blocksize, SEEK_SET);
 	if(fread(blkbuf,1,sb->blocksize,img)==sb->blocksize){
 		uint32_t* fours=(uint32_t*)blkbuf;
@@ -49,9 +144,19 @@ bool SelectDir(FILE* img, uint32_t blkno, struct Directory* dir, char* name){
 			uint16_t entrysize=twos[2];
 			if(fours[0]!=0){
 				if(ones[7]==2 && strcmp(name,(ones+8))==0){
-					free(dir->name);
-					dir->name=malloc(strlen(name)+1);
-					strcpy(dir->name,name);
+					if(strcmp(name,"..")==0){
+						struct Path* temp=epth;
+						epth=epth->parent;
+						free(temp);
+						epth->child=NULL;
+					}
+					else{
+						epth->child=calloc(1,sizeof(struct Path));
+						epth->child->parent=epth;
+						epth=epth->child;
+						epth->name=malloc(strlen(ones+8)+1);
+						strcpy(epth->name, (ones+8));
+					}
 					dir->inodenumber=fours[0];
 					newbno=(fours[0]-1)/sb->inodesgrp;
 					newofst=(fours[0]-1)%sb->inodesgrp;
@@ -78,6 +183,9 @@ void ChangeDir(FILE* img, struct Directory* dirptr, char* name){
 		printf("Typefield not set");
 		return;
 	}
+	if(strcmp(name,".")==0 || (strcmp(name,"..")==0 && epth->parent==NULL)){
+		return;
+	}
 	unsigned char ibuf[sb->inodesize];
 	fseek(img, dirptr->offset, SEEK_SET);
 	if(fread(ibuf,1,sb->inodesize,img)==sb->inodesize){
@@ -93,7 +201,7 @@ void ChangeDir(FILE* img, struct Directory* dirptr, char* name){
 				break;
 		}
 	}else{
-		printf("Failed to read %s dir inode\n");
+		printf("Failed to read dir inode\n");
 		return;
 	}
 	printf("Directory not found\n");
@@ -155,7 +263,7 @@ void List(FILE* img, struct Directory* dirptr){
 				break;
 		}
 	}else{
-		printf("Failed to read %s dir inode\n");
+		printf("Failed to read dir inode\n");
 		return;
 	}
 }
@@ -287,17 +395,25 @@ int main(int argc, char *argv[]) {
 
 	printf("\n");
 
+	bpth=calloc(1,sizeof(struct Path));
+	bpth->name=malloc(1);
+	strcpy(bpth->name,"");
+	epth=bpth;
+
 	char cmd[257];
 	cd=calloc(1,sizeof(struct Directory));
 	cd->inodenumber=2;
-	cd->name=malloc(2);
-	strcpy(cd->name,"");
 	cd->offset=sb->blocksize*(bg+0)->inodetable+sb->inodesize;
 
 	//-------------Input Loop--------------------
 	while(true){
-		struct Directory* t=cd;
-		printf("%s/",t->name);
+		struct Path* t=bpth;
+		while(true){
+			printf("%s/",t->name);
+			if(t->child==NULL)
+				break;
+			t=t->child;
+		}
 		printf(">>");
 		if(fgets(cmd, sizeof(cmd), stdin)!=NULL){
 			cmd[strcspn(cmd,"\n")]='\0';
@@ -310,7 +426,7 @@ int main(int argc, char *argv[]) {
 		else if(strcmp(cmd, "ls")==0){
 			List(img,cd);
 		}
-		else if(strcmp(cmd,"cls")==0){
+		else if(strcmp(cmd,"cls")==0 || strcmp(cmd, "clear")==0){
 			#ifdef _WIN32
     			system("cls");
 			#else
@@ -327,6 +443,29 @@ int main(int argc, char *argv[]) {
 			}
 			else
 				printf("Change directory command cd <dir name>\n");
+		}
+		else if(strncmp(cmd,"cat",3)==0){
+			char* nme=strchr(cmd,' ');
+			if(nme!=NULL){
+				nme+=1;
+				if(nme[0]!=0 && nme[0]!=32){
+					Concatenate(img, cd, nme);
+				}
+			}
+			else
+				printf("Concatenate command cat <file name>\n");
+		}
+		else if(strcmp(cmd,"help")==0){
+			printf("Available commands:\n");
+    		printf("  help                  Show this help message\n");
+    		printf("  exit                  Exit the program\n");
+    		printf("  ls                    List the contents of the current directory\n");
+    		printf("  cls / clear           Clear the screen\n");
+    		printf("  cd <directory name>   Change current directory to the given subdirectory\n");
+    		printf("  cat <file name>       Display the contents of the specified file\n");
+		}
+		else{
+			printf("Command not found\n");
 		}
 	}
     fclose(img);
