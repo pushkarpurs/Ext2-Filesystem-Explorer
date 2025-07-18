@@ -40,6 +40,31 @@ struct Path{
 		char* name;
 }* bpth,* epth;
 
+int findtype(FILE* img, uint32_t ino){
+	uint32_t newbno;
+	uint32_t newofst;
+	unsigned char ibuf[sb->inodesize];
+	uint8_t* v;
+	newbno=(ino-1)/sb->inodesgrp;
+	newofst=(ino-1)%sb->inodesgrp;
+	newofst*=sb->inodesize;
+	newofst=(bg+newbno)->inodetable*sb->blocksize+newofst;
+	fseek(img,newofst,SEEK_SET);
+	if(fread(ibuf,1,sb->inodesize,img)==sb->inodesize){
+		v=(uint8_t*)ibuf;
+		int ret=v[1]>>4;
+		if(ret==0){
+			return ret;
+		}
+		int ra[]={5,3,2,4,1,7,6};
+		return ra[ret/2];
+	}
+	else{
+		printf("Error reading file inode");
+		return 0;
+	}
+}
+
 void ReadFileInode(FILE* img, uint32_t finoffset){
 	unsigned char ibuf[sb->inodesize];
 	unsigned char bbuf[sb->blocksize];
@@ -47,19 +72,135 @@ void ReadFileInode(FILE* img, uint32_t finoffset){
 	if(fread(ibuf,1,sb->inodesize,img)==sb->inodesize){
 		uint32_t* fours=(uint32_t*)ibuf;
 		fours+=10;
-		for(int i=0;i<12;i++){
-			if(fours[i]!=0){
-				fseek(img,fours[i]*sb->blocksize, SEEK_SET);
+		int i=0;
+		for(;i<12;i++){
+			if(fours[i]==0){
+				return;
+			}
+			fseek(img,fours[i]*sb->blocksize, SEEK_SET);
+			if(fread(bbuf,1,sb->blocksize,img)==sb->blocksize){
+				printf("%s",bbuf);
+			}
+			else{
+				printf("Failed to read file block (%d)\n",fours[i]);
+				return;
+			}
+		}
+		if(fours[i]==0){
+			return;
+		}
+		unsigned char bbuf1[sb->blocksize];
+		uint32_t* fours2;
+		fseek(img,fours[i]*sb->blocksize,SEEK_SET);
+		if(fread(bbuf1,1,sb->blocksize,img)==sb->blocksize){
+			fours2=(uint32_t*)bbuf1;
+			for(int sc=0;sc<(sb->blocksize/4);sc++){
+				if(fours2[sc]==0){
+					return;
+				}
+				fseek(img,fours2[sc]*sb->blocksize, SEEK_SET);
 				if(fread(bbuf,1,sb->blocksize,img)==sb->blocksize){
 					printf("%s",bbuf);
 				}
 				else{
-					printf("Failed to read file block (%d)\n",fours[i]);
+					printf("Failed to read file block (%d)\n",fours2[sc]);
 					return;
 				}
 			}
-			else
-				break;
+		}
+		else{
+			printf("Unable to read singly indirect block\n");
+			return;
+		}
+		i+=1;
+		if(fours[i]==0){
+			return;
+		}
+		unsigned char bbuf2[sb->blocksize];
+		uint32_t* fours3;
+		fseek(img,fours[i]*sb->blocksize,SEEK_SET);
+		if(fread(bbuf1,1,sb->blocksize,img)==sb->blocksize){
+			fours2=(uint32_t*)bbuf1;
+			for(int sc=0;sc<(sb->blocksize/4);sc++){
+				if(fours2[sc]==0){
+					return;
+				}
+				fseek(img,fours2[sc]*sb->blocksize,SEEK_SET);
+				if(fread(bbuf2,1,sb->blocksize,img)==sb->blocksize){
+					fours3=(uint32_t*)bbuf2;
+					for(int sc2=0;sc2<(sb->blocksize/4);sc2++){
+						if(fours3[sc2]==0){
+							return;
+						}
+						fseek(img,fours3[sc2]*sb->blocksize, SEEK_SET);
+						if(fread(bbuf,1,sb->blocksize,img)==sb->blocksize){
+							printf("%s",bbuf);
+						}
+						else{
+							printf("Failed to read file block (%d)\n",fours3[sc2]);
+							return;
+						}
+					}
+				}
+				else{
+					printf("Unable to read singly indirect block from doubly indirect block\n");
+				}
+			}
+		}
+		else{
+			printf("Unable to read doubly indirect block\n");
+			return;
+		}
+		i+=1;
+		if(fours[i]==0){
+			return;
+		}
+		unsigned char bbuf3[sb->blocksize];
+		uint32_t* fours4;
+		fseek(img,fours[i]*sb->blocksize,SEEK_SET);
+		if(fread(bbuf1,1,sb->blocksize,img)==sb->blocksize){
+			fours2=(uint32_t*)bbuf1;
+			for(int sc=0;sc<(sb->blocksize/4);sc++){
+				if(fours2[sc]==0){
+					return;
+				}
+				fseek(img,fours2[sc]*sb->blocksize,SEEK_SET);
+				if(fread(bbuf2,1,sb->blocksize,img)==sb->blocksize){
+					fours3=(uint32_t*)bbuf2;
+					for(int sc2=0;sc2<(sb->blocksize/4);sc2++){
+						if(fours3[sc2]==0){
+							return;
+						}
+						fseek(img, fours3[sc2]*sb->blocksize,SEEK_SET);
+						if(fread(bbuf3,1,sb->blocksize,img)==sb->blocksize){
+							fours4=(uint32_t*)bbuf3;
+							for(int sc3=0;sc3<(sb->blocksize/4);sc3++){
+								if(fours4[sc3]==0){
+									return;
+								}
+								fseek(img,fours4[sc3]*sb->blocksize, SEEK_SET);
+								if(fread(bbuf,1,sb->blocksize,img)==sb->blocksize){
+									printf("%s",bbuf);
+								}
+								else{
+									printf("Failed to read file block (%d)\n",fours4[sc3]);
+									return;
+								}
+							}
+						}
+						else{
+							printf("Unable to read singly indirect block from triply indirect block\n");
+						}
+					}
+				}
+				else{
+					printf("Unable to read doubly indirect block from triply indirect block\n");
+				}
+			}
+		}
+		else{
+			printf("Unable to read triply indirect block\n");
+			return;
 		}
 	}else{
 		printf("Failed to read file inode\n");
@@ -81,7 +222,14 @@ bool SelectFile(FILE* img, uint32_t blkno, struct Directory* dir, char* name){
 		while (i<=((sb->blocksize/4)-2)){
 			uint16_t entrysize=twos[2];
 			if(fours[0]!=0){
-				if(ones[7]==1 && strcmp(name,(ones+8))==0){
+				int ftype;
+				if(sb->typefield){
+					ftype=ones[7];
+				}
+				else{
+					ftype=findtype(img, fours[0]);
+				}
+				if(ftype==1 && strcmp(name,(ones+8))==0){
 					newbno=(fours[0]-1)/sb->inodesgrp;
 					newofst=(fours[0]-1)%sb->inodesgrp;
 					newofst*=sb->inodesize;
@@ -104,23 +252,120 @@ bool SelectFile(FILE* img, uint32_t blkno, struct Directory* dir, char* name){
 }
 
 void Concatenate(FILE* img, struct Directory* dirptr, char* name){
-	if(!sb->typefield){
-		printf("Typefield not set");
-		return;
-	}
 	unsigned char ibuf[sb->inodesize];
 	fseek(img, dirptr->offset, SEEK_SET);
 	if(fread(ibuf,1,sb->inodesize,img)==sb->inodesize){
 		uint32_t* fours=(uint32_t*)ibuf;
 		fours+=10;
-		for(int i=0;i<12;i++){
-			if(fours[i]!=0){
-				if(SelectFile(img,fours[i],dirptr,name)){
+		int i=0;
+		for(;i<12;i++){
+			if(fours[i]==0){
+				return;
+			}
+			if(SelectFile(img,fours[i],dirptr,name)){
+				return;
+			}
+		}
+		if(fours[i]==0){
+			return;
+		}
+		unsigned char bbuf1[sb->blocksize];
+		uint32_t* fours2;
+		fseek(img,fours[i]*sb->blocksize,SEEK_SET);
+		if(fread(bbuf1,1,sb->blocksize,img)==sb->blocksize){
+			fours2=(uint32_t*)bbuf1;
+			for(int sc=0;sc<(sb->blocksize/4);sc++){
+				if(fours2[sc]==0){
+					return;
+				}
+				if(SelectFile(img,fours2[sc],dirptr,name)){
 					return;
 				}
 			}
-			else
-				break;
+		}
+		else{
+			printf("Unable to read singly indirect block\n");
+			return;
+		}
+		i+=1;
+		if(fours[i]==0){
+			return;
+		}
+		unsigned char bbuf2[sb->blocksize];
+		uint32_t* fours3;
+		fseek(img,fours[i]*sb->blocksize,SEEK_SET);
+		if(fread(bbuf1,1,sb->blocksize,img)==sb->blocksize){
+			fours2=(uint32_t*)bbuf1;
+			for(int sc=0;sc<(sb->blocksize/4);sc++){
+				if(fours2[sc]==0){
+					return;
+				}
+				fseek(img,fours2[sc]*sb->blocksize,SEEK_SET);
+				if(fread(bbuf2,1,sb->blocksize,img)==sb->blocksize){
+					fours3=(uint32_t*)bbuf2;
+					for(int sc2=0;sc2<(sb->blocksize/4);sc2++){
+						if(fours3[sc2]==0){
+							return;
+						}
+						if(SelectFile(img,fours3[sc2],dirptr,name)){
+							return;
+						}
+					}
+				}
+				else{
+					printf("Unable to read singly indirect block from doubly indirect block\n");
+				}
+			}
+		}
+		else{
+			printf("Unable to read doubly indirect block\n");
+			return;
+		}
+		i+=1;
+		if(fours[i]==0){
+			return;
+		}
+		unsigned char bbuf3[sb->blocksize];
+		uint32_t* fours4;
+		fseek(img,fours[i]*sb->blocksize,SEEK_SET);
+		if(fread(bbuf1,1,sb->blocksize,img)==sb->blocksize){
+			fours2=(uint32_t*)bbuf1;
+			for(int sc=0;sc<(sb->blocksize/4);sc++){
+				if(fours2[sc]==0){
+					return;
+				}
+				fseek(img,fours2[sc]*sb->blocksize,SEEK_SET);
+				if(fread(bbuf2,1,sb->blocksize,img)==sb->blocksize){
+					fours3=(uint32_t*)bbuf2;
+					for(int sc2=0;sc2<(sb->blocksize/4);sc2++){
+						if(fours3[sc2]==0){
+							return;
+						}
+						fseek(img, fours3[sc2]*sb->blocksize,SEEK_SET);
+						if(fread(bbuf3,1,sb->blocksize,img)==sb->blocksize){
+							fours4=(uint32_t*)bbuf3;
+							for(int sc3=0;sc3<(sb->blocksize/4);sc3++){
+								if(fours4[sc3]==0){
+									return;
+								}
+								if(SelectFile(img,fours4[sc3],dirptr,name)){
+									return;
+								}
+							}
+						}
+						else{
+							printf("Unable to read singly indirect block from triply indirect block\n");
+						}
+					}
+				}
+				else{
+					printf("Unable to read doubly indirect block from triply indirect block\n");
+				}
+			}
+		}
+		else{
+			printf("Unable to read triply indirect block\n");
+			return;
 		}
 	}else{
 		printf("Failed to read dir inode\n");
@@ -143,7 +388,14 @@ bool SelectDir(FILE* img, uint32_t blkno, struct Directory* dir, char* name){
 		while (i<=((sb->blocksize/4)-2)){
 			uint16_t entrysize=twos[2];
 			if(fours[0]!=0){
-				if(ones[7]==2 && strcmp(name,(ones+8))==0){
+				int etype;
+				if(sb->typefield){
+					etype=ones[7];
+				}
+				else{
+					etype=findtype(img,fours[0]);
+				}
+				if(etype==2 && strcmp(name,(ones+8))==0){
 					if(strcmp(name,"..")==0){
 						struct Path* temp=epth;
 						epth=epth->parent;
@@ -179,10 +431,6 @@ bool SelectDir(FILE* img, uint32_t blkno, struct Directory* dir, char* name){
 }
 
 void ChangeDir(FILE* img, struct Directory* dirptr, char* name){
-	if(!sb->typefield){
-		printf("Typefield not set");
-		return;
-	}
 	if(strcmp(name,".")==0 || (strcmp(name,"..")==0 && epth->parent==NULL)){
 		return;
 	}
@@ -191,14 +439,115 @@ void ChangeDir(FILE* img, struct Directory* dirptr, char* name){
 	if(fread(ibuf,1,sb->inodesize,img)==sb->inodesize){
 		uint32_t* fours=(uint32_t*)ibuf;
 		fours+=10;
-		for(int i=0;i<12;i++){
-			if(fours[i]!=0){
-				if(SelectDir(img,fours[i],dirptr,name)){
+		int i=0;
+		for(;i<12;i++){
+			if(fours[i]==0){
+				return;
+			}
+			if(SelectDir(img,fours[i],dirptr,name)){
+				return;
+			}
+		}
+		if(fours[i]==0){
+			return;
+		}
+		unsigned char bbuf1[sb->blocksize];
+		uint32_t* fours2;
+		fseek(img,fours[i]*sb->blocksize,SEEK_SET);
+		if(fread(bbuf1,1,sb->blocksize,img)==sb->blocksize){
+			fours2=(uint32_t*)bbuf1;
+			for(int sc=0;sc<(sb->blocksize/4);sc++){
+				if(fours2[sc]==0){
+					return;
+				}
+				if(SelectDir(img,fours2[sc],dirptr,name)){
 					return;
 				}
 			}
-			else
-				break;
+		}
+		else{
+			printf("Unable to read singly indirect block\n");
+			return;
+		}
+		i+=1;
+		if(fours[i]==0){
+			return;
+		}
+		unsigned char bbuf2[sb->blocksize];
+		uint32_t* fours3;
+		fseek(img,fours[i]*sb->blocksize,SEEK_SET);
+		if(fread(bbuf1,1,sb->blocksize,img)==sb->blocksize){
+			fours2=(uint32_t*)bbuf1;
+			for(int sc=0;sc<(sb->blocksize/4);sc++){
+				if(fours2[sc]==0){
+					return;
+				}
+				fseek(img,fours2[sc]*sb->blocksize,SEEK_SET);
+				if(fread(bbuf2,1,sb->blocksize,img)==sb->blocksize){
+					fours3=(uint32_t*)bbuf2;
+					for(int sc2=0;sc2<(sb->blocksize/4);sc2++){
+						if(fours3[sc2]==0){
+							return;
+						}
+						if(SelectDir(img,fours3[sc2],dirptr,name)){
+							return;
+						}
+					}
+				}
+				else{
+					printf("Unable to read singly indirect block from doubly indirect block\n");
+				}
+			}
+		}
+		else{
+			printf("Unable to read doubly indirect block\n");
+			return;
+		}
+		i+=1;
+		if(fours[i]==0){
+			return;
+		}
+		unsigned char bbuf3[sb->blocksize];
+		uint32_t* fours4;
+		fseek(img,fours[i]*sb->blocksize,SEEK_SET);
+		if(fread(bbuf1,1,sb->blocksize,img)==sb->blocksize){
+			fours2=(uint32_t*)bbuf1;
+			for(int sc=0;sc<(sb->blocksize/4);sc++){
+				if(fours2[sc]==0){
+					return;
+				}
+				fseek(img,fours2[sc]*sb->blocksize,SEEK_SET);
+				if(fread(bbuf2,1,sb->blocksize,img)==sb->blocksize){
+					fours3=(uint32_t*)bbuf2;
+					for(int sc2=0;sc2<(sb->blocksize/4);sc2++){
+						if(fours3[sc2]==0){
+							return;
+						}
+						fseek(img, fours3[sc2]*sb->blocksize,SEEK_SET);
+						if(fread(bbuf3,1,sb->blocksize,img)==sb->blocksize){
+							fours4=(uint32_t*)bbuf3;
+							for(int sc3=0;sc3<(sb->blocksize/4);sc3++){
+								if(fours4[sc3]==0){
+									return;
+								}
+								if(SelectDir(img,fours4[sc3],dirptr,name)){
+									return;
+								}
+							}
+						}
+						else{
+							printf("Unable to read singly indirect block from triply indirect block\n");
+						}
+					}
+				}
+				else{
+					printf("Unable to read doubly indirect block from triply indirect block\n");
+				}
+			}
+		}
+		else{
+			printf("Unable to read triply indirect block\n");
+			return;
 		}
 	}else{
 		printf("Failed to read dir inode\n");
@@ -233,7 +582,7 @@ void ReadContents(FILE* img, uint32_t blkno){
 					printf("%s (%s)",(ones+8), file_types[ones[7]]);
 				}
 				else{
-					printf("%s (%s)",(ones+8), file_types[0]);
+					printf("%s (%s)",(ones+8), file_types[findtype(img, fours[0])]);
 				}
 				printf("\n");
 			}
@@ -246,7 +595,6 @@ void ReadContents(FILE* img, uint32_t blkno){
 	else{
 		printf("Error in reading directory entries");
 	}
-	return;
 }
 
 void List(FILE* img, struct Directory* dirptr){
@@ -255,12 +603,107 @@ void List(FILE* img, struct Directory* dirptr){
 	if(fread(ibuf,1,sb->inodesize,img)==sb->inodesize){
 		uint32_t* fours=(uint32_t*)ibuf;
 		fours+=10;
-		for(int i=0;i<12;i++){
-			if(fours[i]!=0){
-				ReadContents(img,fours[i]);
+		int i=0;
+		for(;i<12;i++){
+			if(fours[i]==0){
+				return;
 			}
-			else
-				break;
+			ReadContents(img,fours[i]);
+		}
+		if(fours[i]==0){
+			return;
+		}
+		unsigned char bbuf1[sb->blocksize];
+		uint32_t* fours2;
+		fseek(img,fours[i]*sb->blocksize,SEEK_SET);
+		if(fread(bbuf1,1,sb->blocksize,img)==sb->blocksize){
+			fours2=(uint32_t*)bbuf1;
+			for(int sc=0;sc<(sb->blocksize/4);sc++){
+				if(fours2[sc]==0){
+					return;
+				}
+				ReadContents(img,fours2[sc]);
+			}
+		}
+		else{
+			printf("Unable to read singly indirect block\n");
+			return;
+		}
+		i+=1;
+		if(fours[i]==0){
+			return;
+		}
+		unsigned char bbuf2[sb->blocksize];
+		uint32_t* fours3;
+		fseek(img,fours[i]*sb->blocksize,SEEK_SET);
+		if(fread(bbuf1,1,sb->blocksize,img)==sb->blocksize){
+			fours2=(uint32_t*)bbuf1;
+			for(int sc=0;sc<(sb->blocksize/4);sc++){
+				if(fours2[sc]==0){
+					return;
+				}
+				fseek(img,fours2[sc]*sb->blocksize,SEEK_SET);
+				if(fread(bbuf2,1,sb->blocksize,img)==sb->blocksize){
+					fours3=(uint32_t*)bbuf2;
+					for(int sc2=0;sc2<(sb->blocksize/4);sc2++){
+						if(fours3[sc2]==0){
+							return;
+						}
+						ReadContents(img,fours3[sc2]);
+					}
+				}
+				else{
+					printf("Unable to read singly indirect block from doubly indirect block\n");
+				}
+			}
+		}
+		else{
+			printf("Unable to read doubly indirect block\n");
+			return;
+		}
+		i+=1;
+		if(fours[i]==0){
+			return;
+		}
+		unsigned char bbuf3[sb->blocksize];
+		uint32_t* fours4;
+		fseek(img,fours[i]*sb->blocksize,SEEK_SET);
+		if(fread(bbuf1,1,sb->blocksize,img)==sb->blocksize){
+			fours2=(uint32_t*)bbuf1;
+			for(int sc=0;sc<(sb->blocksize/4);sc++){
+				if(fours2[sc]==0){
+					return;
+				}
+				fseek(img,fours2[sc]*sb->blocksize,SEEK_SET);
+				if(fread(bbuf2,1,sb->blocksize,img)==sb->blocksize){
+					fours3=(uint32_t*)bbuf2;
+					for(int sc2=0;sc2<(sb->blocksize/4);sc2++){
+						if(fours3[sc2]==0){
+							return;
+						}
+						fseek(img, fours3[sc2]*sb->blocksize,SEEK_SET);
+						if(fread(bbuf3,1,sb->blocksize,img)==sb->blocksize){
+							fours4=(uint32_t*)bbuf3;
+							for(int sc3=0;sc3<(sb->blocksize/4);sc3++){
+								if(fours4[sc3]==0){
+									return;
+								}
+								ReadContents(img,fours4[sc3]);
+							}
+						}
+						else{
+							printf("Unable to read singly indirect block from triply indirect block\n");
+						}
+					}
+				}
+				else{
+					printf("Unable to read doubly indirect block from triply indirect block\n");
+				}
+			}
+		}
+		else{
+			printf("Unable to read triply indirect block\n");
+			return;
 		}
 	}else{
 		printf("Failed to read dir inode\n");
@@ -314,12 +757,12 @@ int main(int argc, char *argv[]) {
 			printf("File system state isnt clean\n");
 		}
 		if(ceil(fours[1]*1.0/fours[8])==ceil(fours[0]*1.0/fours[10])){
-			sb->grps=(int)ceil(fours[1]*1.0/fours[8]);
+			sb->grps=(uint32_t)ceil(fours[1]*1.0/fours[8]);
 			sb->totblocks=fours[1];
 			sb->totinodes=fours[0];
 			sb->inodesgrp=fours[10];
 			sb->blocskgrp=fours[8];
-			printf("Number of blocks groups= %d\n", (int)ceil(fours[1]*1.0/fours[8]));
+			printf("Number of blocks groups= %d\n", sb->grps);
 			printf("Number of blocks per group= %d\n", fours[8]);
 			printf("Number of inodes per group= %d\n", fours[10]);
 		}
@@ -358,7 +801,7 @@ int main(int argc, char *argv[]) {
 
 	bg=calloc(sb->grps,sizeof(struct BlockGroup));
 
-	int seek=sb->blocksize;
+	uint32_t seek=sb->blocksize;
 	if (seek==1024)
 		seek=2048;
 
@@ -368,7 +811,7 @@ int main(int argc, char *argv[]) {
 	{
 		uint32_t* fours2=(uint32_t* )buffer2;
 		uint16_t* twos2=(uint16_t* )buffer2;
-		for(int i=0;i<sb->grps;i++){ 
+		for(uint32_t i=0;i<sb->grps;i++){ 
 			(bg+i)->blockmap=fours2[0];
 			(bg+i)->inodemap=fours2[1];
 			(bg+i)->inodetable=fours2[2];
@@ -400,7 +843,7 @@ int main(int argc, char *argv[]) {
 	strcpy(bpth->name,"");
 	epth=bpth;
 
-	char cmd[257];
+	char cmd[512];
 	cd=calloc(1,sizeof(struct Directory));
 	cd->inodenumber=2;
 	cd->offset=sb->blocksize*(bg+0)->inodetable+sb->inodesize;
